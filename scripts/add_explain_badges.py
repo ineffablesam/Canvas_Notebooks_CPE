@@ -20,6 +20,11 @@ Cells that don't need an explanation badge are skipped automatically:
   - cells that contain `# TODO` markers (unfinished skeleton the student must
     still complete -- nothing to explain yet)
 
+The badge is a full-width HTML table (plain `width`/`align` attributes, no
+`style=` CSS, and raw `<img>`/`<a>` tags instead of Markdown badge syntax) so
+it survives Google Colab's markdown sanitizer, which strips inline CSS and
+stops parsing Markdown inside raw HTML blocks.
+
 Each notebook's original JSON indent width is auto-detected and preserved so
 re-writing a file doesn't produce a noisy whole-file diff.
 
@@ -90,18 +95,19 @@ def make_badge_cell(code_source: str, video_url: str = VIDEO_PLACEHOLDER, cell_i
     encoded = urllib.parse.quote_plus(prompt)
     chatgpt_url = "https://chatgpt.com/?q=" + encoded
 
+    # Colab sandboxes markdown cells and strips inline "style" CSS, and it
+    # also stops parsing Markdown syntax (like ![]()) inside a raw HTML
+    # block. So: plain HTML attributes only (width/align survive), and raw
+    # <img>/<a> tags instead of Markdown badge syntax -- nothing left for a
+    # Markdown parser to fail to convert.
     html = (
-        '<div style="display:flex; align-items:center; justify-content:space-between; '
-        'border-left:4px solid #999; border-radius:6px; background:rgba(153,153,153,0.08); '
-        'padding:8px 20px 8px 16px; margin:6px 0;">\n'
-        "  <span>&#128269;&nbsp;<b>Stuck on this code?</b></span>\n"
-        '  <span style="display:flex; align-items:center; gap:8px;">\n'
-        f'    <a href="{video_url}"><img src="https://img.shields.io/badge/Watch_Video-red?style=flat&amp;logo=youtube&amp;logoColor=white" '
-        'alt="Watch the video" style="height:26px; vertical-align:middle;"></a>\n'
-        f'    <a href="{chatgpt_url}"><img src="https://img.shields.io/badge/%F0%9F%A4%96_Explain_with_ChatGPT-10a37f?style=flat" '
-        'alt="Explain with ChatGPT" style="height:26px; vertical-align:middle;"></a>\n'
-        "  </span>\n"
-        "</div>"
+        '<table width="100%"><tr>'
+        "<td>&#128269;&nbsp;<b>Stuck on this code?</b></td>"
+        '<td align="right">'
+        f'<a href="{video_url}"><img src="https://img.shields.io/badge/Watch_Video-red?style=flat&logo=youtube&logoColor=white"></a> '
+        f'<a href="{chatgpt_url}"><img src="https://img.shields.io/badge/%F0%9F%A4%96_Explain_with_ChatGPT-10a37f?style=flat"></a>'
+        "</td>"
+        "</tr></table>"
     )
 
     return {

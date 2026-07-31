@@ -20,7 +20,9 @@ local Chromium renderer at once.
 import json
 import os
 import shutil
+import subprocess
 import sys
+import threading
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -32,8 +34,15 @@ ROOT = "/Users/sam/Downloads/Canvas_Notebooks"
 VIDEO_MANIFEST = "/tmp/video_manifest.json"
 LOG_PATH = "/tmp/generate_videos.log"
 WORKERS = int(os.environ.get("PYEXPLAIN_WORKERS", "4"))
+# Cartesia account limit observed live: "Current limit: 2" concurrent TTS
+# requests (429 above that). Only the narrate step hits Cartesia, so gate
+# just that step at 2 concurrent while analyze/render (CPU/browser-bound,
+# not Cartesia-bound) can still run with up to WORKERS threads in parallel.
+CARTESIA_CONCURRENCY = int(os.environ.get("CARTESIA_CONCURRENCY", "2"))
+NARRATE_SEM = threading.Semaphore(CARTESIA_CONCURRENCY)
 POLL_INTERVAL = 2.0
 JOB_TIMEOUT_S = 900  # 15 min ceiling per stage before we give up on a group
+GIT_LOCK = threading.Lock()
 
 
 def log(msg: str):
@@ -41,6 +50,29 @@ def log(msg: str):
     print(line, flush=True)
     with open(LOG_PATH, "a") as f:
         f.write(line + "\n")
+
+
+def git_commit_and_push(paths: list, message: str):
+    """Commit + push the given (absolute) paths. Serialized across threads
+    since git's index is a single shared file. Plain author, no co-author
+    trailer -- these are project commits, not chat-authored ones."""
+    with GIT_LOCK:
+        try:
+            subprocess.run(["git", "add", "--"] + paths, cwd=ROOT, check=True,
+                           capture_output=True, text=True)
+            commit = subprocess.run(["git", "commit", "-m", message], cwd=ROOT,
+                                    capture_output=True, text=True)
+            if commit.returncode != 0 and "nothing to commit" not in commit.stdout:
+                log(f"git commit warning: {commit.stdout.strip()} {commit.stderr.strip()}")
+                return
+            push = subprocess.run(["git", "push", "origin", "HEAD"], cwd=ROOT,
+                                  capture_output=True, text=True, timeout=60)
+            if push.returncode != 0:
+                log(f"git push FAILED (will stay committed locally): {push.stderr.strip()[:300]}")
+            else:
+                log(f"git pushed: {message}")
+        except Exception as e:
+            log(f"git commit/push error: {e}")
 
 
 def wait_for_job(jid: str, ok_statuses, timeout=JOB_TIMEOUT_S):
@@ -74,14 +106,19 @@ def generate_one(group: dict) -> dict:
         raise RuntimeError(f"analyze failed: {script.get('error')}")
     script.setdefault("meta", {})["style"] = "stevens"
 
-    # 2. narrate -- Cartesia voice, background job
-    r = requests.post(f"{BASE}/api/narrate", json={
-        "script": script, "voice_provider": "cartesia",
-    }, timeout=60)
-    r.raise_for_status()
-    jid = r.json()["job_id"]
-    job = wait_for_job(jid, ok_statuses=("narrated",))
-    narrated_script = job["script"]
+    # 2. narrate -- Cartesia voice, background job. Cartesia's account
+    # concurrency limit is 2, so only 2 of these can be in flight at once
+    # across all worker threads (the narrate job itself calls Cartesia
+    # once per scene, sequentially, so holding the semaphore for the whole
+    # job's duration keeps us at or under the limit).
+    with NARRATE_SEM:
+        r = requests.post(f"{BASE}/api/narrate", json={
+            "script": script, "voice_provider": "cartesia",
+        }, timeout=60)
+        r.raise_for_status()
+        jid = r.json()["job_id"]
+        job = wait_for_job(jid, ok_statuses=("narrated",))
+        narrated_script = job["script"]
 
     # 3. render -- reuse the narrate job_id so the audio dir is already there
     r = requests.post(f"{BASE}/api/render", json={
@@ -117,6 +154,12 @@ def worker(group: dict) -> tuple:
             log(f"group {gid:>3} ({n}x) start attempt {attempt}: {label}")
             result = generate_one(group)
             log(f"group {gid:>3} DONE -> {result['job_id']} copied to {len(result['copied'])} location(s)")
+            rel_paths = [os.path.relpath(p, ROOT) for p in result["copied"]]
+            where = rel_paths[0] if len(rel_paths) == 1 else f"{len(rel_paths)} notebooks"
+            git_commit_and_push(
+                result["copied"],
+                f"Add explain-code video for block {group['id']}: {label} ({where})",
+            )
             return gid, "done", result
         except Exception as e:
             log(f"group {gid:>3} attempt {attempt} FAILED: {e}")

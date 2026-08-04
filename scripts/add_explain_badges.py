@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Add "Watch Video" + "Explain with ChatGPT" badges above code cells.
+"""Add "Watch Video" badges above code cells.
 
 Usage:
     python3 scripts/add_explain_badges.py [--dry-run]
@@ -7,14 +7,11 @@ Usage:
 What it does
 ------------
 For every .ipynb file under the Module folders, walks each code cell and inserts
-a small markdown "badge" cell directly above it with two links:
-  - Watch Video: a placeholder link (VIDEO_LINK_HERE) to be filled in later
-    once the per-cell explainer videos are recorded.
-  - Explain with ChatGPT: opens a new ChatGPT chat pre-filled with that cell's
-    exact code and a prompt asking for a step-by-step, beginner-friendly
-    explanation.
+a small markdown "badge" cell directly above it with a Watch Video link: a
+placeholder link (VIDEO_LINK_HERE) to be filled in later once the per-cell
+explainer videos are recorded.
 
-Cells that don't need an explanation badge are skipped automatically:
+Cells that don't need a badge are skipped automatically:
   - cells with no real code (comments/blank only)
   - cells that are just a lone `pass` placeholder (student scratch space)
   - cells that contain `# TODO` markers (unfinished skeleton the student must
@@ -29,9 +26,8 @@ Each notebook's original JSON indent width is auto-detected and preserved so
 re-writing a file doesn't produce a noisy whole-file diff.
 
 Re-running the script is safe and self-healing: if a code cell is already
-preceded by a badge cell, its ChatGPT link is refreshed to match the code
-cell's current content, and a Watch Video badge is added if it's missing.
-Any real video link you've already filled in (anything other than the
+preceded by a badge cell, a Watch Video badge is added if it's missing. Any
+real video link you've already filled in (anything other than the
 VIDEO_LINK_HERE placeholder) is preserved as-is.
 """
 import argparse
@@ -39,15 +35,8 @@ import glob
 import json
 import re
 import secrets
-import urllib.parse
 
-PROMPT_PREFIX = (
-    "Explain what this Python code does, step by step, in simple "
-    "beginner-friendly terms. Do not just repeat the code back to me; "
-    "explain the *why* behind each line.\n\n"
-)
-
-BADGE_MARKER = "chatgpt.com/?q="
+BADGE_MARKER = "img.shields.io/badge/Watch_Video"
 VIDEO_PLACEHOLDER = "VIDEO_LINK_HERE"
 VIDEO_HREF_RE = re.compile(
     r'<a href="([^"]+)"><img src="https://img\.shields\.io/badge/Watch_Video'
@@ -90,11 +79,7 @@ def existing_video_url(cell) -> str:
     return VIDEO_PLACEHOLDER
 
 
-def make_badge_cell(code_source: str, video_url: str = VIDEO_PLACEHOLDER, cell_id: str = None) -> dict:
-    prompt = PROMPT_PREFIX + code_source
-    encoded = urllib.parse.quote_plus(prompt)
-    chatgpt_url = "https://chatgpt.com/?q=" + encoded
-
+def make_badge_cell(video_url: str = VIDEO_PLACEHOLDER, cell_id: str = None) -> dict:
     # Colab sandboxes markdown cells and strips inline "style" CSS, and it
     # also stops parsing Markdown syntax (like ![]()) inside a raw HTML
     # block. So: plain HTML attributes only (width/align survive), and raw
@@ -104,8 +89,7 @@ def make_badge_cell(code_source: str, video_url: str = VIDEO_PLACEHOLDER, cell_i
         '<table width="100%"><tr>'
         "<td>&#128269;&nbsp;<b>Stuck on this code?</b></td>"
         '<td align="right">'
-        f'<a href="{video_url}"><img src="https://img.shields.io/badge/Watch_Video-red?style=flat&logo=youtube&logoColor=white"></a> '
-        f'<a href="{chatgpt_url}"><img src="https://img.shields.io/badge/%F0%9F%A4%96_Explain_with_ChatGPT-10a37f?style=flat"></a>'
+        f'<a href="{video_url}"><img src="https://img.shields.io/badge/Watch_Video-red?style=flat&logo=youtube&logoColor=white"></a>'
         "</td>"
         "</tr></table>"
     )
@@ -134,12 +118,12 @@ def process_notebook(path: str, dry_run: bool) -> tuple[int, int]:
             if needs_badge(source):
                 if is_badge_cell(prev_cell):
                     video_url = existing_video_url(prev_cell)
-                    refreshed = make_badge_cell(source, video_url, cell_id=prev_cell.get("id"))
+                    refreshed = make_badge_cell(video_url, cell_id=prev_cell.get("id"))
                     if refreshed["source"] != prev_cell.get("source"):
                         new_cells[-1] = refreshed
                         updated += 1
                 else:
-                    new_cells.append(make_badge_cell(source))
+                    new_cells.append(make_badge_cell())
                     added += 1
         new_cells.append(cell)
 
@@ -160,7 +144,7 @@ def main():
 
     total_added = 0
     total_updated = 0
-    for path in sorted(glob.glob("Module */*.ipynb")):
+    for path in sorted(glob.glob("Module */*/*.ipynb")):
         added, updated = process_notebook(path, args.dry_run)
         if added or updated:
             print(f"{path}: +{added} new, {updated} updated")

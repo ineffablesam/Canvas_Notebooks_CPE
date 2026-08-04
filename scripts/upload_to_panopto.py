@@ -347,6 +347,14 @@ def get_or_create_module_folder(auth, module_name):
                 json={"Name": module_name, "Parent": FOLDER_ID}, headers={"content-type": "application/json"},
             )
             folder_id = resp.json()["Id"]
+            # New folders default to Restricted (viewer-less) instead of
+            # inheriting the parent's actual sharing level -- without this,
+            # every video in a freshly created module folder would be
+            # invisible to anyone but the uploader.
+            _request(
+                auth, "PUT", f"https://{SERVER}/Panopto/api/v1/folders/{folder_id}/settings/access",
+                json={"IsInherited": True}, headers={"content-type": "application/json"},
+            )
 
         _module_folder_cache[module_name] = folder_id
         return folder_id

@@ -89,7 +89,7 @@ def make_badge_cell(video_url: str = VIDEO_PLACEHOLDER, cell_id: str = None) -> 
         '<table width="100%"><tr>'
         "<td>&#128269;&nbsp;<b>Stuck on this code?</b></td>"
         '<td align="right">'
-        f'<a href="{video_url}"><img src="https://img.shields.io/badge/Watch_Video-red?style=flat&logo=youtube&logoColor=white"></a>'
+        f'<a href="{video_url}"><img src="https://img.shields.io/badge/Watch_Video-0B7A53?style=flat&logo=youtubemusic&logoColor=white"></a>'
         "</td>"
         "</tr></table>"
     )
